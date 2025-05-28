@@ -1,6 +1,10 @@
+from collections import defaultdict
+from email.policy import default
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchmetrics
+from torchmetrics.classification import BinaryAccuracy, BinaryPrecision, BinaryRecall
 from torchvision.models import densenet121
 from pytorch_lightning import LightningModule
 
@@ -28,6 +32,18 @@ class ActionConditionalModel(LightningModule):
             nn.Linear(256, 2),  # Output: [success_prob, gentleness_prob]
             nn.Sigmoid(),
         )
+
+        # Metrics
+        metrics_raw = torchmetrics.MetricCollection({
+            "acc": BinaryAccuracy(),
+            "prec": BinaryPrecision(),
+            "rec": BinaryRecall(),
+        })
+
+        for result_name in ["grasp", "gentle"]:
+            for stage in ["train", "val"]:
+                metrics = metrics_raw.clone(prefix=f"{stage}_{result_name}_")
+                setattr(self, f"metrics_{stage}_{result_name}", metrics)
 
     def _get_densenet(self):
         model = densenet121(pretrained=True)
@@ -67,11 +83,26 @@ class ActionConditionalModel(LightningModule):
         out = self.final_mlp(all_feats)  # [B, 2]
         return out
 
+    def on_train_start(self):
+        torch.set_float32_matmul_precision("high")
+
+    def _compute_metrics(self, preds, labels, stage):
+        preds_bin = (preds > 0.5).int()
+        labels_bin = labels.int()
+
+        for i, result_name in enumerate(["grasp", "gentle"]):
+            batch_values = getattr(self, f"metrics_{stage}_{result_name}")(preds_bin[:, i], labels_bin[:, i])
+            self.log_dict(batch_values, on_step=False, on_epoch=True)
+
     def training_step(self, batch, batch_idx):
+        
         vision_imgs, touch_imgs, actions, labels = batch
         preds = self(vision_imgs, touch_imgs, actions)
         loss = F.binary_cross_entropy(preds, labels)
         self.log("train_loss", loss)
+
+        self._compute_metrics(preds, labels, "train")
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -79,6 +110,8 @@ class ActionConditionalModel(LightningModule):
         preds = self(vision_imgs, touch_imgs, actions)
         loss = F.binary_cross_entropy(preds, labels)
         self.log("val_loss", loss, prog_bar=True)
+        
+        self._compute_metrics(preds, labels, "val")
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
