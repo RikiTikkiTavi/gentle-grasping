@@ -21,14 +21,15 @@ class ActionConditionalModel(LightningModule):
 
         # MLPs for action inputs
         # relpose_action: [B, 4] (motion)
-        self.motion_mlp = nn.Sequential(nn.Linear(4, 64), nn.ReLU(), nn.Linear(64, 64))
+        self.motion_mlp = nn.Sequential(nn.Linear(4, 64), nn.ReLU(), nn.Dropout(0.5), nn.Linear(64, 64))
         # hand_action: [B, 16] (pose)
-        self.pose_mlp = nn.Sequential(nn.Linear(16, 64), nn.ReLU(), nn.Linear(64, 64))
+        self.pose_mlp = nn.Sequential(nn.Linear(16, 64), nn.ReLU(), nn.Dropout(0.5), nn.Linear(64, 64))
 
         # Final MLP
         self.final_mlp = nn.Sequential(
             nn.Linear(4 * 1024 + 2 * 64, 256),
             nn.ReLU(),
+            nn.Dropout(0.5),
             nn.Linear(256, 2),  # Output: [success_prob, gentleness_prob]
             nn.Sigmoid(),
         )
