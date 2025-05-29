@@ -22,6 +22,9 @@ class ActionConditionalModel(nn.Module):
         dropout_sensory: float = 0.25,
         dropout_action: float = 0.25,
         dropout_final: float = 0.25,
+        action_hidden_dim: int = 1024,
+        action_embedding_dim: int = 1024,
+        final_hidden_dim: int = 1024,
     ):
         super().__init__()
 
@@ -43,20 +46,20 @@ class ActionConditionalModel(nn.Module):
 
         # hand_action: [B, 16] (pose)
         self.pose_mlp = nn.Sequential(
-            nn.Linear(16, 1024),
+            nn.Linear(16, action_hidden_dim),
             nn.ReLU(),
             nn.Dropout(p=dropout_action),
-            nn.Linear(1024, 1024),
+            nn.Linear(action_hidden_dim, action_embedding_dim),
             nn.ReLU(),
             nn.Dropout(p=dropout_action),
         )
 
         # Final MLP
         self.final_mlp = nn.Sequential(
-            nn.Linear(3 * 1024 + 2 * 1024, 1024),
+            nn.Linear(3 * 1024 + 2 * action_embedding_dim, final_hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout_final),
-            nn.Linear(1024, 2),  # Output: [success_prob, gentleness_prob]
+            nn.Linear(final_hidden_dim, 2),  # Output: [success_prob, gentleness_prob]
             nn.Sigmoid(),
         )
 
