@@ -1,53 +1,67 @@
 from collections import defaultdict
 from email.policy import default
+import hydra
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
-from torchmetrics.classification import BinaryAccuracy, BinaryPrecision, BinaryRecall
+from torchmetrics.classification import BinaryAccuracy, BinarySpecificity, ConfusionMatrix
 from torchvision.models import densenet121
 from pytorch_lightning import LightningModule
+from pytorch_lightning.loggers import MLFlowLogger
+from mlflow import MlflowClient
+import seaborn as sns
+import matplotlib.pyplot as plt
+import tempfile
 
+class ActionConditionalModel(nn.Module):
 
-class ActionConditionalModel(LightningModule):
-    def __init__(self, lr: float = 1e-4):
+    def __init__(
+        self,
+        dropout_sensory: float = 0.25,
+        dropout_action: float = 0.25,
+        dropout_final: float = 0.25,
+    ):
         super().__init__()
-        self.save_hyperparameters()
 
         # Vision backbones for 3 images
-        self.vision_backbone_rgb = self._get_densenet()
-        self.vision_backbone_middle = self._get_densenet()
-        self.vision_backbone_thumb = self._get_densenet()
+        self.vision_backbone_rgb = self._get_densenet(dropout=dropout_sensory)
+        self.vision_backbone_middle = self._get_densenet(dropout=dropout_sensory)
+        self.vision_backbone_thumb = self._get_densenet(dropout=dropout_sensory)
 
         # MLPs for action inputs
         # relpose_action: [B, 4] (motion)
-        self.motion_mlp = nn.Sequential(nn.Linear(4, 64), nn.ReLU(), nn.Dropout(0.5), nn.Linear(64, 64))
+        self.motion_mlp = nn.Sequential(
+            nn.Linear(4, 1024),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_action),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_action),
+        )
+
         # hand_action: [B, 16] (pose)
-        self.pose_mlp = nn.Sequential(nn.Linear(16, 64), nn.ReLU(), nn.Dropout(0.5), nn.Linear(64, 64))
+        self.pose_mlp = nn.Sequential(
+            nn.Linear(16, 1024),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_action),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_action),
+        )
 
         # Final MLP
         self.final_mlp = nn.Sequential(
-            nn.Linear(4 * 1024 + 2 * 64, 256),
+            nn.Linear(3 * 1024 + 2 * 1024, 1024),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(256, 2),  # Output: [success_prob, gentleness_prob]
+            nn.Dropout(dropout_final),
+            nn.Linear(1024, 2),  # Output: [success_prob, gentleness_prob]
             nn.Sigmoid(),
         )
 
-        # Metrics
-        metrics_raw = torchmetrics.MetricCollection({
-            "acc": BinaryAccuracy(),
-            "prec": BinaryPrecision(),
-            "rec": BinaryRecall(),
-        })
-
-        for result_name in ["grasp", "gentle"]:
-            for stage in ["train", "val"]:
-                metrics = metrics_raw.clone(prefix=f"{stage}_{result_name}_")
-                setattr(self, f"metrics_{stage}_{result_name}", metrics)
-
-    def _get_densenet(self):
-        model = densenet121(pretrained=True)
+    def _get_densenet(self, dropout: float = 0.5):
+        model = densenet121(weights="IMAGENET1K_V1", drop_rate=dropout)
         model.classifier = nn.Identity()  # type: ignore
         return model
 
@@ -66,7 +80,7 @@ class ActionConditionalModel(LightningModule):
 
         # Extract features from DenseNet
         feat_rgb = self.vision_backbone_rgb(vision_rgb)  # [B, 1024]
-        feat_depth = self.vision_backbone_middle(vision_depth)
+        # feat_depth = self.vision_backbone_middle(vision_depth)
         feat_middle = self.vision_backbone_middle(touch_middle)
         feat_thumb = self.vision_backbone_thumb(touch_thumb)
 
@@ -76,7 +90,7 @@ class ActionConditionalModel(LightningModule):
 
         # Concatenate all
         all_feats = torch.cat(
-            [feat_rgb, feat_depth, feat_middle, feat_thumb, motion_feat, pose_feat],
+            [feat_rgb, feat_middle, feat_thumb, motion_feat, pose_feat],
             dim=1,
         )
 
@@ -84,19 +98,55 @@ class ActionConditionalModel(LightningModule):
         out = self.final_mlp(all_feats)  # [B, 2]
         return out
 
-    def on_train_start(self):
-        torch.set_float32_matmul_precision("high")
+
+class GentleGraspModelModule(LightningModule):
+    def __init__(self, cfg: dict):
+        super().__init__()
+        self.cfg = cfg
+
+        self.model = hydra.utils.instantiate(self.cfg.model)  # type: ignore
+
+        # Metrics
+        metrics_raw = torchmetrics.MetricCollection(
+            {"acc": BinaryAccuracy(), "specificity": BinarySpecificity()}
+        )
+
+        self.val_cm_joint = ConfusionMatrix(task="multiclass", num_classes=4)
+
+        for result_name in ["grasp", "gentle"]:
+            for stage in ["train", "val"]:
+                metrics = metrics_raw.clone(prefix=f"{stage}_{result_name}_")
+                setattr(self, f"metrics_{stage}_{result_name}", metrics)
 
     def _compute_metrics(self, preds, labels, stage):
         preds_bin = (preds > 0.5).int()
         labels_bin = labels.int()
 
         for i, result_name in enumerate(["grasp", "gentle"]):
-            batch_values = getattr(self, f"metrics_{stage}_{result_name}")(preds_bin[:, i], labels_bin[:, i])
-            self.log_dict(batch_values, on_step=False, on_epoch=True)
+            batch_values = getattr(self, f"metrics_{stage}_{result_name}")(
+                preds_bin[:, i], labels_bin[:, i]
+            )
+            self.log_dict(batch_values, on_step=False, on_epoch=True, reduce_fx="mean")
+
+    def _compute_joint_cm(self, preds, labels, stage):
+        preds_bin = (preds > 0.5).int()
+        labels_bin = labels.int()
+        # preds and labels are [B, 2], binary
+        pred_classes = preds_bin[:, 0] * 2 + preds_bin[:, 1]  # [B]
+        label_classes = labels_bin[:, 0] * 2 + labels_bin[:, 1]  # [B]
+
+        self.val_cm_joint.update(pred_classes, label_classes)
+
+    def forward(
+        self,
+        vision_imgs: tuple[torch.Tensor, torch.Tensor],
+        touch_imgs: tuple[torch.Tensor, torch.Tensor],
+        actions: tuple[torch.Tensor, torch.Tensor],
+    ):
+        return self.model(vision_imgs, touch_imgs, actions)
 
     def training_step(self, batch, batch_idx):
-        
+
         vision_imgs, touch_imgs, actions, labels = batch
         preds = self(vision_imgs, touch_imgs, actions)
         loss = F.binary_cross_entropy(preds, labels)
@@ -111,8 +161,61 @@ class ActionConditionalModel(LightningModule):
         preds = self(vision_imgs, touch_imgs, actions)
         loss = F.binary_cross_entropy(preds, labels)
         self.log("val_loss", loss, prog_bar=True)
-        
+
         self._compute_metrics(preds, labels, "val")
+        self._compute_joint_cm(preds, labels, "val")
+    
+    def on_validation_epoch_end(self):
+        cm = self.val_cm_joint.compute()  # shape [4, 4]
+
+        # Convert to DataFrame with meaningful labels
+        labels = ["(0,0)", "(0,1)", "(1,0)", "(1,1)"]
+        cm_df = pd.DataFrame(cm.cpu().numpy(), index=labels, columns=labels)
+
+        # Log to MLflow
+        if isinstance(self.logger, MLFlowLogger):
+            client: MlflowClient = self.logger.experiment
+            client.log_table(
+                run_id=self.logger.run_id, # type: ignore
+                artifact_file=f"confusion_matrix_epoch_{self.current_epoch}.json",
+                data=cm_df,
+            )
+
+            # === Create and Log Plot ===
+            fig, ax = plt.subplots(figsize=(5, 4))
+            sns.heatmap(cm_df, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
+            ax.set_xlabel("Predicted")
+            ax.set_ylabel("Actual")
+            ax.set_title("Joint Confusion Matrix (Success + Gentleness)")
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                plot_path = f"{tmp_dir}/confusion_matrix_epoch_{self.current_epoch}.png"
+                fig.tight_layout()
+                fig.savefig(plot_path)
+                plt.close(fig)
+
+                client.log_artifact(
+                    run_id=self.logger.run_id, # type: ignore
+                    local_path=plot_path, 
+                    artifact_path="plots"
+                )
+
+        # Reset for next epoch
+        self.val_cm_joint.reset()
+
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        optimizer = hydra.utils.instantiate(
+            self.cfg.optimizer,  # type: ignore
+        )(params=self.parameters())
+        scheduler = hydra.utils.instantiate(
+            self.cfg.lr_scheduler,  # type: ignore
+        )(optimizer=optimizer)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
