@@ -1,0 +1,7 @@
+_target_: gentle_grasp.model_module.ActionConditionalModel
+dropout_sensory: 0.35
+dropout_action: 0.35
+dropout_final: 0.35
+action_hidden_dim: 1024
+action_embedding_dim: 1024
+final_hidden_dim: 1024

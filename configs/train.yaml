@@ -1,0 +1,5 @@
+defaults:
+  - _self_
+  - lr_scheduler: exponential
+  - optimizer: adam
+  - model: action_conditional
