@@ -4,8 +4,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import MLFlowLogger
 import torch
 
-from gentle_grasp.model_module import GentleGraspModelModule
-from gentle_grasp.data_module import GentleGraspDataModule
+from model_module import GentleGraspModelModule
+from data_module import GentleGraspDataModule
 
 import hydra
 import mlflow
@@ -22,7 +22,7 @@ def main(cfg: dict):
     torch.set_float32_matmul_precision("high")
 
     # Initialize MLflow
-
+    
     with mlflow.start_run(run_name="cv_parent", nested=False):
         for fold_id in range(cfg.cv.n_folds if cfg.cv.enabled else 1):
             with mlflow.start_run(run_name=f"Fold {fold_id}", nested=True):
