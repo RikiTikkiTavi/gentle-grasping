@@ -13,6 +13,7 @@ class GentleGraspDataModule(LightningDataModule):
         num_workers: int = 4,
         val_ratio: float = 0.2,
         cv = None,
+        fold: int = 0,
     ):
         super().__init__()
         self.data_path = data_path
@@ -22,12 +23,12 @@ class GentleGraspDataModule(LightningDataModule):
 
         self.cv_enabled  = cv.enabled
         self.n_folds     = cv.n_folds
-        self.fold        = cv.fold
+        self.fold        = fold
 
     def setup(self, stage=None):
         dataset = torch.load(self.data_path)
         if self.cv_enabled:
-            kf = KFold(n_splits=self.n_folds, shuffle=True, random_state=42)
+            kf = KFold(n_splits=self.n_folds, shuffle=True)
             splits = list(kf.split(range(len(dataset))))
             train_idx, val_idx = splits[self.fold]
             self.train_dataset = Subset(dataset, train_idx)
