@@ -19,7 +19,7 @@ def main(cfg: dict):
 
     torch.set_float32_matmul_precision("high")
 
-    datamodule = GentleGraspDataModule(data_path=data_path, batch_size=batch_size, num_workers=2, val_ratio=0.2)
+    datamodule = GentleGraspDataModule(data_path=data_path, batch_size=batch_size, num_workers=2, val_ratio=0.2, cv=cfg.cv)
 
     modelmodule = GentleGraspModelModule(cfg=cfg)
 

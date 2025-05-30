@@ -3,3 +3,8 @@ defaults:
   - lr_scheduler: exponential
   - optimizer: adam
   - model: action_conditional
+
+cv:
+  enabled: true
+  n_folds: 5
+  fold: 0
