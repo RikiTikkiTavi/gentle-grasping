@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import MLFlowLogger
 import torch
 
@@ -25,6 +25,7 @@ def main(cfg: dict):
 
     # Callbacks
     early_stop = EarlyStopping(monitor="val_loss", patience=20, mode="min")
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     # Logger
     logger = MLFlowLogger(
@@ -39,7 +40,10 @@ def main(cfg: dict):
     # Trainer
     trainer = pl.Trainer(
         max_epochs=50,
-        callbacks=[early_stop],
+        callbacks=[
+            early_stop,
+            lr_monitor,
+        ],
         logger=logger,
         accelerator="auto",
         devices=[6],
