@@ -1,4 +1,5 @@
 from pathlib import Path
+from omegaconf import OmegaConf
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import MLFlowLogger
@@ -9,49 +10,81 @@ from gentle_grasp.data_module import GentleGraspDataModule
 
 import hydra
 
-from torchmetrics import Accuracy
+import mlflow
+
+from contextlib import nullcontext
 
 @hydra.main(version_base="1.3", config_path="../../configs", config_name="train")
-def main(cfg: dict):
-    mlflow_tracking_uri = "https://dagshub.com/RikiTikkiTavi/gentle-grasping.mlflow"
-    data_path = Path("/data/horse/ws/s4610340-gentle-grasp/gentle-grasping/data/raw/data_gentle_grasping/gentle_grasping_dataset.pth")
-    batch_size = 64
+def main(cfg: OmegaConf):
+    # TODO: Remove reassignments
+    mlflow_tracking_uri = cfg.tracking.uri
+    experiment_name = cfg.tracking.experiment
+    run_name = cfg.tracking.run
+    data_path = Path(cfg.dataset_path)
+    batch_size = cfg.batch_size
+    max_epochs = cfg.max_epochs
 
     torch.set_float32_matmul_precision("high")
 
-    datamodule = GentleGraspDataModule(data_path=data_path, batch_size=batch_size, num_workers=2, val_ratio=0.2)
+    n_folds = cfg.split.get("n_folds", 1)
 
-    modelmodule = GentleGraspModelModule(cfg=cfg)
+    print(mlflow_tracking_uri)
+    print(cfg.split)
 
-    # Callbacks
-    early_stop = EarlyStopping(monitor="val_loss", patience=20, mode="min")
-    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    mlflow.set_tracking_uri(mlflow_tracking_uri)
+    mlflow.set_experiment(experiment_name=experiment_name)
 
-    # Logger
-    logger = MLFlowLogger(
-        tracking_uri=mlflow_tracking_uri,
-        experiment_name="gentle_grasping_experiment",
-        run_name="action_conditional_model_run",
-    )
+    # Start the parent run
+    with mlflow.start_run(run_name=run_name) as parent_run:
+        # Iterate over folds
+        for fold_i in range(n_folds):
+            # Start the child run if in multi-fold settings
+            with (
+                mlflow.start_run(
+                    run_name=f"fold_{fold_i}_{run_name}",
+                    nested=True,
+                    parent_run_id=parent_run.info.run_id,
+                ) if n_folds > 1 else nullcontext(enter_result=parent_run)
+            ) as child_run:
 
-    # Log hyperparameters
-    logger.log_hyperparams(cfg)
+                datamodule = GentleGraspDataModule(
+                    data_path=data_path, 
+                    batch_size=batch_size, 
+                    num_workers=2, 
+                    split_strategy=hydra.utils.instantiate(cfg.split, fold=fold_i),
+                )
 
-    # Trainer
-    trainer = pl.Trainer(
-        max_epochs=50,
-        callbacks=[
-            early_stop,
-            lr_monitor,
-        ],
-        logger=logger,
-        accelerator="auto",
-        devices=[6],
-        enable_checkpointing=False,
-    )
+                modelmodule = GentleGraspModelModule(cfg=cfg)
 
-    trainer.fit(modelmodule, datamodule=datamodule)
+                # Callbacks
+                early_stop = EarlyStopping(monitor="val_loss", patience=20, mode="min")
+                lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
+                # Logger
+                logger = MLFlowLogger(
+                    tracking_uri=mlflow_tracking_uri,
+                    run_id=child_run.info.run_id
+                )
+
+                # Log hyperparameters
+                logger.log_hyperparams(cfg)
+
+                # Trainer
+                trainer = pl.Trainer(
+                    max_epochs=max_epochs,
+                    callbacks=[
+                        early_stop,
+                        lr_monitor,
+                    ],
+                    logger=logger,
+                    accelerator="auto",
+                    devices=[6],
+                    enable_checkpointing=False,
+                )
+
+                trainer.fit(modelmodule, datamodule=datamodule)
+
+                # TODO: Get best/last metrics and log to parent
 
 if __name__ == "__main__":
     main()

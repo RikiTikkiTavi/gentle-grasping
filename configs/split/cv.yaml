@@ -1,0 +1,3 @@
+_partial_: False
+_target_: gentle_grasp.data_module.CrossValidationSplit
+n_folds: 5
