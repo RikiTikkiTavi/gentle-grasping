@@ -57,7 +57,8 @@ def main(cfg: OmegaConf):
                 modelmodule = GentleGraspModelModule(cfg=cfg)
 
                 # Callbacks
-                early_stop = EarlyStopping(monitor="val_loss", patience=20, mode="min")
+                # Stop if no improvement after 5 epochs
+                early_stop = EarlyStopping(monitor="val_loss", patience=5, mode="min", min_delta=0.00)
                 lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
                 # Logger

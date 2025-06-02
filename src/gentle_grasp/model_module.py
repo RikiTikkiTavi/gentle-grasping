@@ -37,30 +37,34 @@ class ActionConditionalModel(nn.Module):
         # relpose_action: [B, 4] (motion)
         self.motion_mlp = nn.Sequential(
             nn.Linear(4, 1024),
-            nn.ReLU(),
+            nn.BatchNorm1d(num_features=1024),
+            nn.Mish(),
             nn.Dropout(p=dropout_action),
             nn.Linear(1024, 1024),
-            nn.ReLU(),
+            nn.BatchNorm1d(num_features=1024),
+            nn.Mish(),
             nn.Dropout(p=dropout_action),
         )
 
         # hand_action: [B, 16] (pose)
         self.pose_mlp = nn.Sequential(
             nn.Linear(16, action_hidden_dim),
-            nn.ReLU(),
+            nn.BatchNorm1d(num_features=action_hidden_dim),
+            nn.Mish(),
             nn.Dropout(p=dropout_action),
             nn.Linear(action_hidden_dim, action_embedding_dim),
-            nn.ReLU(),
+            nn.BatchNorm1d(num_features=action_hidden_dim),
+            nn.Mish(),
             nn.Dropout(p=dropout_action),
         )
 
         # Final MLP
         self.final_mlp = nn.Sequential(
             nn.Linear(3 * 1024 + 2 * action_embedding_dim, final_hidden_dim),
-            nn.ReLU(),
+            nn.BatchNorm1d(num_features=final_hidden_dim),
+            nn.Mish(),
             nn.Dropout(dropout_final),
             nn.Linear(final_hidden_dim, 2),  # Output: [success_prob, gentleness_prob]
-            nn.Sigmoid(),
         )
 
     def _get_densenet(self, dropout: float = 0.5):
@@ -152,7 +156,7 @@ class GentleGraspModelModule(LightningModule):
 
         vision_imgs, touch_imgs, actions, labels = batch
         preds = self(vision_imgs, touch_imgs, actions)
-        loss = F.binary_cross_entropy(preds, labels)
+        loss = F.binary_cross_entropy_with_logits(preds, labels)
         self.log("train_loss", loss)
 
         self._compute_metrics(preds, labels, "train")
@@ -162,9 +166,10 @@ class GentleGraspModelModule(LightningModule):
     def validation_step(self, batch, batch_idx):
         vision_imgs, touch_imgs, actions, labels = batch
         preds = self(vision_imgs, touch_imgs, actions)
-        loss = F.binary_cross_entropy(preds, labels)
+        loss = F.binary_cross_entropy_with_logits(preds, labels)
         self.log("val_loss", loss, prog_bar=True)
-
+        
+        preds = F.sigmoid(preds)
         self._compute_metrics(preds, labels, "val")
         self._compute_joint_cm(preds, labels, "val")
     
