@@ -84,6 +84,7 @@ def main(cfg: OmegaConf):
 
                 trainer.fit(modelmodule, datamodule=datamodule)
 
+                # TODO: Get best/last metrics and log to parent
 
 if __name__ == "__main__":
     main()
