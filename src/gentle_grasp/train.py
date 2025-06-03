@@ -50,7 +50,7 @@ def main(cfg: OmegaConf):
                 datamodule = GentleGraspDataModule(
                     data_path=data_path, 
                     batch_size=batch_size, 
-                    num_workers=2, 
+                    num_workers=8, 
                     split_strategy=hydra.utils.instantiate(cfg.split, fold=fold_i),
                 )
 
