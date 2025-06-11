@@ -5,7 +5,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, Learning
 from pytorch_lightning.loggers import MLFlowLogger
 import torch
 
-from gentle_grasp.model_module import GentleGraspModelModule
+from gentle_grasp.model.action_conditional import GentleGraspModelModule
 from gentle_grasp.data_module import GentleGraspDataModule
 
 import hydra
