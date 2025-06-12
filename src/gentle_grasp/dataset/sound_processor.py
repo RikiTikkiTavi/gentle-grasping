@@ -3,6 +3,9 @@ from pathlib import Path
 from typing import Literal
 
 import torch
+import numpy as np
+from scipy.io import wavfile
+from scipy import signal
 
 
 class AbstractSoundProcessor(ABC):
@@ -26,6 +29,7 @@ class Dummy1DSoundProcessor(AbstractSoundProcessor):
     def __init__(self, **sound_processing_kwargs):
         self.sound_processing_kwargs = sound_processing_kwargs
 
+    # TODO: Didn't really understand the desired format
     def output_dim(self) -> Literal[1, 2]:
         """
         Returns the output dimension of the sound features.
@@ -33,16 +37,44 @@ class Dummy1DSoundProcessor(AbstractSoundProcessor):
         """
         return 1
 
-    def read(self, path: Path) -> torch.Tensor:
+    def read(self, path: Path) -> tuple[torch.Tensor, int]:
         """
         Reads an audio waveform from a file.
+        Args:
+            path (Path): Path to the audio file.
+        Returns:
+            tuple[torch.Tensor, int]: A tuple containing the waveform tensor and the sample rate.
         """
-        waveform = torch.zeros(16000)  # mock waveform
-        return waveform
+        sample_rate, data = wavfile.read(path)
+        if data.dtype == np.int16:
+            data = data.astype(np.float32) / 32768.0
+        elif data.dtype == np.int32:
+            data = data.astype(np.float32) / 2**31
 
-    def transform(self, waveform: torch.Tensor) -> torch.Tensor:
+        if data.ndim == 1:
+            waveform = torch.from_numpy(data)[None, :]
+        else:
+            waveform = torch.from_numpy(data.T)
+        return waveform, sample_rate
+
+    def transform(self, waveform: torch.Tensor, sample_rate: int) -> torch.Tensor:
         """
         Extracts audio features from a waveform.
+        Args:
+            waveform (torch.Tensor): The audio waveform tensor.
+            sample_rate (int): The sample rate of the audio.
+        Returns:
+            torch.Tensor: A tensor containing the extracted audio features.
         """
-        features = torch.zeros(128)  # mock feature vector
-        return features
+        specs = []
+        for channel in waveform:
+            f, t, Sxx = signal.spectrogram(
+                channel.numpy(),
+                fs=sample_rate,
+            )
+
+            Sxx_dB = 10 * np.log10(Sxx + 1e-10)
+            specs.append(Sxx_dB)
+
+        spec_tensor = torch.tensor(specs, dtype=torch.float32)
+        return spec_tensor
