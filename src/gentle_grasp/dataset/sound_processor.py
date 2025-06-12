@@ -46,10 +46,6 @@ class Dummy1DSoundProcessor(AbstractSoundProcessor):
             tuple[torch.Tensor, int]: A tuple containing the waveform tensor and the sample rate.
         """
         sample_rate, data = wavfile.read(path)
-        if data.dtype == np.int16:
-            data = data.astype(np.float32) / 32768.0
-        elif data.dtype == np.int32:
-            data = data.astype(np.float32) / 2**31
 
         if data.ndim == 1:
             waveform = torch.from_numpy(data)[None, :]
@@ -66,6 +62,8 @@ class Dummy1DSoundProcessor(AbstractSoundProcessor):
         Returns:
             torch.Tensor: A tensor containing the extracted audio features.
         """
+        #TODO: Maybe add normalization or other transformations
+
         specs = []
         for channel in waveform:
             f, t, Sxx = signal.spectrogram(
