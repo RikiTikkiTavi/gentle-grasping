@@ -80,12 +80,12 @@ class StaticSoundAwareModel(nn.Module):
         # MLPs for action inputs
         # relpose_action: [B, 4] (motion)
         self.motion_mlp = nn.Sequential(
-            nn.Linear(4, 1024),
-            nn.BatchNorm1d(num_features=1024),
+            nn.Linear(4, action_hidden_dim),
+            nn.BatchNorm1d(num_features=action_hidden_dim),
             nn.Mish(),
             nn.Dropout(p=dropout_action),
-            nn.Linear(1024, 1024),
-            nn.BatchNorm1d(num_features=1024),
+            nn.Linear(action_hidden_dim, action_embedding_dim),
+            nn.BatchNorm1d(num_features=action_embedding_dim),
             nn.Mish(),
             nn.Dropout(p=dropout_action),
         )
@@ -97,10 +97,15 @@ class StaticSoundAwareModel(nn.Module):
             nn.Mish(),
             nn.Dropout(p=dropout_action),
             nn.Linear(action_hidden_dim, action_embedding_dim),
-            nn.BatchNorm1d(num_features=action_hidden_dim),
+            nn.BatchNorm1d(num_features=action_embedding_dim),
             nn.Mish(),
             nn.Dropout(p=dropout_action),
         )
+
+        # Freeze action MLPs
+        for m in [self.motion_mlp, self.pose_mlp]:
+            for param in m.parameters():
+                param.requires_grad = False  # Freeze action MLPs
 
         # Sound embedding
         self.sound_embedding = AudioCNN(
