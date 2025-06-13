@@ -1,9 +1,10 @@
-import torchaudio
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Literal, List, Callable
 
 import torch
+import torchaudio
+import torch.nn.functional as F
 import numpy as np
 from scipy.io import wavfile
 from scipy import signal
@@ -62,6 +63,7 @@ class BaseSoundProcessor(AbstractSoundProcessor):
             augmentation_transform: List[Callable] | None = None,
     ):
         self.sample_rate = 44100
+        self.target_shapes: dict | None = None  # Sets Padding and Cropping shapes in format {dimension: shape}
         self.augmentation_transform = augmentation_transform or []
 
     def output_dim(self) -> Literal[1, 2]: ...
@@ -84,6 +86,33 @@ class BaseSoundProcessor(AbstractSoundProcessor):
             )(waveform)
 
         return waveform
+
+    def _apply_padding(self, tensor: torch.Tensor) -> torch.Tensor:
+        if not self.target_shapes:
+            return tensor
+
+        paddings = [0] * (2 * tensor.ndim)
+
+        for dim, target_len in self.target_shapes.items():
+            current_len = tensor.shape[dim]
+            if current_len < target_len:
+                pad_amount = target_len - current_len
+                # F.pad expects padding in reverse order: last dimension first
+                paddings[-(2 * dim + 1)] = pad_amount
+
+        padded_tensor = F.pad(tensor, tuple(paddings))
+        return padded_tensor
+
+    def _apply_cropping(self, tensor: torch.Tensor) -> torch.Tensor:
+        if not self.target_shapes:
+            return tensor
+
+        slices = [slice(None)] * tensor.ndim
+        for dim, target_len in self.target_shapes.items():
+            current_len = tensor.shape[dim]
+            if current_len > target_len:
+                slices[dim] = slice(0, target_len)
+        return tensor[tuple(slices)]
 
     def transform(self, waveform: torch.Tensor) -> torch.Tensor:
         features = self.extraction_transform(waveform)
@@ -153,8 +182,21 @@ class Spectrogram2DSoundProcessor(BaseSoundProcessor):
 
 class LogMel2DSoundProcessor(BaseSoundProcessor):
     """
+    Sound processor that extracts 2D Log-Mel Spectrogram features from raw audio waveforms.
 
+    This processor converts a mono audio waveform into a time-frequency representation
+    using the Mel-scale filter bank, followed by logarithmic compression. The output is a
+    2D tensor of shape [n_mels, time_frames], where each value represents the log-scaled
+    energy of a mel-frequency band at a given time window.
+
+    Parameters:
+        sample_rate (int): Target sample rate for audio processing.
+        n_fft (int): Size of the FFT window used for STFT.
+        hop_length (int): Number of samples between successive frames (controls time resolution).
+        n_mels (int): Number of mel filterbanks (frequency resolution after projection to mel-scale).
+        augmentation_transform (List[Callable], optional): List of augmentations
     """
+
     def __init__(
             self,
             sample_rate=44100,
