@@ -2,8 +2,8 @@ defaults:
   - _self_
   - lr_scheduler: exponential
   - optimizer: adam
-  - model: action_conditional
-  - split: cv
+  - model: static_sound_aware
+  - split: random
 
 tracking:
   uri: https://dagshub.com/RikiTikkiTavi/gentle-grasping.mlflow

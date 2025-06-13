@@ -8,7 +8,7 @@ import torchvision.transforms.v2 as transforms
 from gentle_grasp.split_strategy import SplitStrategy
 from gentle_grasp.dataset import sound_processor
 from gentle_grasp.dataset.static_sound_aware import StaticSoundAwareLazyDataset, SampleLoader
-from gentle_grasp.dataset.sound_processor import AbstractSoundProcessor, Dummy1DSoundProcessor
+from gentle_grasp.dataset.sound_processor import AbstractSoundProcessor, LogMel2DSoundProcessor
 
 
 
@@ -42,7 +42,7 @@ class GentleGraspDataModule(LightningDataModule):
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ]
 
-        sound_processor=Dummy1DSoundProcessor()
+        sound_processor=LogMel2DSoundProcessor()
 
         loader = SampleLoader(sound_processor=sound_processor,)
 

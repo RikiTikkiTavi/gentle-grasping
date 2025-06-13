@@ -6,7 +6,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
-from torchmetrics.classification import BinaryAccuracy, BinarySpecificity, ConfusionMatrix
+from torchmetrics.classification import (
+    BinaryAccuracy,
+    BinarySpecificity,
+    ConfusionMatrix,
+    BinaryConfusionMatrix
+)
 from torchvision.models import densenet121
 from pytorch_lightning import LightningModule
 from pytorch_lightning.loggers import MLFlowLogger
@@ -15,14 +20,55 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import tempfile
 
-class ActionConditionalModel(nn.Module):
+
+class AudioCNN(nn.Sequential):
+
+    def __init__(
+        self,
+        embedding_dim=128, 
+        input_channels=1
+    ):
+        super().__init__(
+            # Layer 1
+            nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+
+            # Layer 2
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+
+            # Layer 3
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+
+            # Flattening
+            nn.Flatten(),
+
+            # Fully Connected Layers
+            nn.Linear(128 * 16 * 16, 256),  # Assuming input mel-spectrogram size of 128x128
+            nn.ReLU(),
+            nn.Dropout(0.5),
+
+            # Embedding Layer
+            nn.Linear(256, embedding_dim)
+        )
+
+
+class StaticSoundAwareModel(nn.Module):
 
     def __init__(
         self,
         dropout_sensory: float = 0.25,
+        dropout_action: float = 0.25,
         dropout_final: float = 0.25,
+        action_hidden_dim: int = 1024,
         action_embedding_dim: int = 1024,
+        sound_embedding_dim: int = 128,
         final_hidden_dim: int = 1024,
+        output_dim: int = 1
     ):
         super().__init__()
 
@@ -31,13 +77,44 @@ class ActionConditionalModel(nn.Module):
         self.vision_backbone_middle = self._get_densenet(dropout=dropout_sensory)
         self.vision_backbone_thumb = self._get_densenet(dropout=dropout_sensory)
 
+        # MLPs for action inputs
+        # relpose_action: [B, 4] (motion)
+        self.motion_mlp = nn.Sequential(
+            nn.Linear(4, 1024),
+            nn.BatchNorm1d(num_features=1024),
+            nn.Mish(),
+            nn.Dropout(p=dropout_action),
+            nn.Linear(1024, 1024),
+            nn.BatchNorm1d(num_features=1024),
+            nn.Mish(),
+            nn.Dropout(p=dropout_action),
+        )
+
+        # hand_action: [B, 16] (pose)
+        self.pose_mlp = nn.Sequential(
+            nn.Linear(16, action_hidden_dim),
+            nn.BatchNorm1d(num_features=action_hidden_dim),
+            nn.Mish(),
+            nn.Dropout(p=dropout_action),
+            nn.Linear(action_hidden_dim, action_embedding_dim),
+            nn.BatchNorm1d(num_features=action_hidden_dim),
+            nn.Mish(),
+            nn.Dropout(p=dropout_action),
+        )
+
+        # Sound embedding
+        self.sound_embedding = AudioCNN(
+            embedding_dim=sound_embedding_dim,
+            input_channels=1,  # Assuming mono audio input
+        )
+
         # Final MLP
         self.final_mlp = nn.Sequential(
-            nn.Linear(3 * 1024 + 2 * action_embedding_dim, final_hidden_dim),
+            nn.Linear(3 * 1024 + 2 * action_embedding_dim + sound_embedding_dim, final_hidden_dim),
             nn.BatchNorm1d(num_features=final_hidden_dim),
             nn.Mish(),
             nn.Dropout(dropout_final),
-            nn.Linear(final_hidden_dim, 2),  # Output: [success_prob, gentleness_prob]
+            nn.Linear(final_hidden_dim, output_dim),  # Output: [success_prob, gentleness_prob]
         )
 
     def _get_densenet(self, dropout: float = 0.5):
@@ -45,32 +122,33 @@ class ActionConditionalModel(nn.Module):
         model.classifier = nn.Identity()  # type: ignore
         return model
 
-    def forward(
-        self,
-        vision_imgs: tuple[torch.Tensor, torch.Tensor],
-        touch_imgs: tuple[torch.Tensor, torch.Tensor],
-        actions: tuple[torch.Tensor, torch.Tensor],
-    ):
-        vision_rgb, vision_depth = vision_imgs  # [B, 3, 224, 224]
-        touch_middle, touch_thumb = touch_imgs  # [B, 3, 224, 224]
-        hand_action, relpose_action = actions  # [B, 16], [B, 4]
+    def forward(self, input: dict[str, torch.Tensor],):
+        vision_rgb = input["camera_rgb"]  # [B, 3, 224, 224]
+        # vision_depth = input["camera_depth"]  # [B, 3, 224, 224]
+        # touch_middle = input["touch_middle"]  # [B, 3, 224, 224]
+        # touch_thumb = input["touch_thumb"]  # [B, 3, 224, 224]
 
-        # Flatten batch size 1 if needed (safe for both training and eval)
-        B = vision_rgb.size(0)
+        # *Note*: Zero tensors for actions as placeholders
+        hand_action = torch.zeros(vision_rgb.shape[0], 16, device=vision_rgb.device)  # [B, 16]
+        relpose_action = torch.zeros(vision_rgb.shape[0], 4, device=vision_rgb.device)  # [B, 4]
+        
 
         # Extract features from DenseNet
         feat_rgb = self.vision_backbone_rgb(vision_rgb)  # [B, 1024]
         # feat_depth = self.vision_backbone_middle(vision_depth)
-        feat_middle = self.vision_backbone_middle(touch_middle)
-        feat_thumb = self.vision_backbone_thumb(touch_thumb)
+        feat_middle = self.vision_backbone_middle(input["touch_middle"])
+        feat_thumb = self.vision_backbone_thumb(input["touch_thumb"])
 
         # Encode actions
         motion_feat = self.motion_mlp(relpose_action)  # [B, 64]
         pose_feat = self.pose_mlp(hand_action)  # [B, 64]
 
+        sound = input["sound"].unsqueeze(1) # [B, 1, spectrogram_height, spectrogram_width]
+        sound_feat = self.sound_embedding(sound)  # [B, sound_embedding_dim]
+
         # Concatenate all
         all_feats = torch.cat(
-            [feat_rgb, feat_middle, feat_thumb, motion_feat, pose_feat],
+            [feat_rgb, feat_middle, feat_thumb, motion_feat, pose_feat, sound_feat],
             dim=1,
         )
 
@@ -79,7 +157,7 @@ class ActionConditionalModel(nn.Module):
         return out
 
 
-class GentleGraspModelModule(LightningModule):
+class StaticSoundAwareGraspSuccessModelModule(LightningModule):
     def __init__(self, cfg: dict):
         super().__init__()
         self.cfg = cfg
@@ -91,9 +169,11 @@ class GentleGraspModelModule(LightningModule):
             {"acc": BinaryAccuracy(), "specificity": BinarySpecificity()}
         )
 
-        self.val_cm_joint = ConfusionMatrix(task="multiclass", num_classes=4)
+        self.val_cm_joint = BinaryConfusionMatrix()
 
-        for result_name in ["grasp", "gentle"]:
+        self.output_labels = ["grasp"]
+
+        for result_name in self.output_labels:
             for stage in ["train", "val"]:
                 metrics = metrics_raw.clone(prefix=f"{stage}_{result_name}_")
                 setattr(self, f"metrics_{stage}_{result_name}", metrics)
@@ -102,7 +182,7 @@ class GentleGraspModelModule(LightningModule):
         preds_bin = (preds > 0.5).int()
         labels_bin = labels.int()
 
-        for i, result_name in enumerate(["grasp", "gentle"]):
+        for i, result_name in enumerate(self.output_labels):
             batch_values = getattr(self, f"metrics_{stage}_{result_name}")(
                 preds_bin[:, i], labels_bin[:, i]
             )
@@ -111,24 +191,30 @@ class GentleGraspModelModule(LightningModule):
     def _compute_joint_cm(self, preds, labels, stage):
         preds_bin = (preds > 0.5).int()
         labels_bin = labels.int()
-        # preds and labels are [B, 2], binary
-        pred_classes = preds_bin[:, 0] * 2 + preds_bin[:, 1]  # [B]
-        label_classes = labels_bin[:, 0] * 2 + labels_bin[:, 1]  # [B]
+        num_outputs = len(self.output_labels)
+
+        if num_outputs == 1:
+            pred_classes = preds_bin[:, 0]
+            label_classes = labels_bin[:, 0]
+        elif num_outputs == 2:
+            pred_classes = preds_bin[:, 0] * 2 + preds_bin[:, 1]
+            label_classes = labels_bin[:, 0] * 2 + labels_bin[:, 1]
+        else:
+            raise ValueError("Only supports 1 or 2 output labels for joint confusion matrix.")
 
         self.val_cm_joint.update(pred_classes, label_classes)
 
     def forward(
         self,
-        vision_imgs: tuple[torch.Tensor, torch.Tensor],
-        touch_imgs: tuple[torch.Tensor, torch.Tensor],
-        actions: tuple[torch.Tensor, torch.Tensor],
+        inputs: dict[str, torch.Tensor],
     ):
-        return self.model(vision_imgs, touch_imgs, actions)
+        return self.model(inputs)
 
     def training_step(self, batch, batch_idx):
 
-        vision_imgs, touch_imgs, actions, labels = batch
-        preds = self(vision_imgs, touch_imgs, actions)
+        inputs = batch
+        labels = batch.pop("labels")
+        preds = self(inputs)
         loss = F.binary_cross_entropy_with_logits(preds, labels)
         self.log("train_loss", loss)
 
@@ -137,27 +223,28 @@ class GentleGraspModelModule(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        vision_imgs, touch_imgs, actions, labels = batch
-        preds = self(vision_imgs, touch_imgs, actions)
+        inputs = batch
+        labels = batch.pop("labels")
+        preds = self(inputs)
         loss = F.binary_cross_entropy_with_logits(preds, labels)
         self.log("val_loss", loss, prog_bar=True)
-        
+
         preds = F.sigmoid(preds)
         self._compute_metrics(preds, labels, "val")
         self._compute_joint_cm(preds, labels, "val")
-    
+
     def on_validation_epoch_end(self):
         cm = self.val_cm_joint.compute()  # shape [4, 4]
 
         # Convert to DataFrame with meaningful labels
-        labels = ["(0,0)", "(0,1)", "(1,0)", "(1,1)"]
+        labels = ["0", "1"]  # Assuming binary classification for grasp success
         cm_df = pd.DataFrame(cm.cpu().numpy(), index=labels, columns=labels)
 
         # Log to MLflow
         if isinstance(self.logger, MLFlowLogger):
             client: MlflowClient = self.logger.experiment
             client.log_table(
-                run_id=self.logger.run_id, # type: ignore
+                run_id=self.logger.run_id,  # type: ignore
                 artifact_file=f"confusion_matrix_epoch_{self.current_epoch}.json",
                 data=cm_df,
             )
@@ -176,14 +263,13 @@ class GentleGraspModelModule(LightningModule):
                 plt.close(fig)
 
                 client.log_artifact(
-                    run_id=self.logger.run_id, # type: ignore
-                    local_path=plot_path, 
-                    artifact_path="plots"
+                    run_id=self.logger.run_id,  # type: ignore
+                    local_path=plot_path,
+                    artifact_path="plots",
                 )
 
         # Reset for next epoch
         self.val_cm_joint.reset()
-
 
     def configure_optimizers(self):
         optimizer = hydra.utils.instantiate(

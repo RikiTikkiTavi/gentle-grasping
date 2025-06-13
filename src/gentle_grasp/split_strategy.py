@@ -22,7 +22,7 @@ class SplitStrategy(ABC):
 
 
 class RandomSplit(SplitStrategy):
-    def __init__(self, val_size=0.2, seed: int = 42):
+    def __init__(self, val_size=0.2, seed: int = 42, fold=None):
         self.val_size = val_size
         self._seed = seed
 

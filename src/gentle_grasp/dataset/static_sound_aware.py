@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 import os
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, Sequence
 import numpy as np
 import torch
 from PIL import Image
@@ -107,6 +107,7 @@ class StaticSoundAwareLazyDataset(Dataset):
         transforms: Callable,
         loader: SampleLoader,
         sound_processor: AbstractSoundProcessor,
+        label_idx: Sequence[int] = (0,)
     ):
         self.root_dir = root_dir
         self.transform = transforms
@@ -114,6 +115,7 @@ class StaticSoundAwareLazyDataset(Dataset):
         self.time_steps = [1, 12, 2]
         self.loader = loader
         self.sound_processor = sound_processor
+        self.label_idx = label_idx
 
         # Collect all valid samples in the root directory
         for p in sorted(root_dir.glob("*")):
@@ -161,7 +163,7 @@ class StaticSoundAwareLazyDataset(Dataset):
             "touch_middle": touch_middle,
             "touch_thumb": touch_thumb,
             "sound": sound,
-            "labels": sample["labels"],
+            "labels": sample["labels"][list(self.label_idx)],  # Select only specified labels
         }
 
     def __len__(self):
