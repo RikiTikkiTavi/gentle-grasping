@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from matplotlib import pyplot as plt
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +26,7 @@ class AbstractSoundProcessor(ABC):
     def transform(self, waveform: torch.Tensor) -> torch.Tensor: ...
 
 
-class Dummy1DSoundProcessor(AbstractSoundProcessor):
+class Spectrogram2DSoundProcessor(AbstractSoundProcessor):
     def __init__(self, **sound_processing_kwargs):
         self.sound_processing_kwargs = sound_processing_kwargs
 
@@ -76,3 +77,4 @@ class Dummy1DSoundProcessor(AbstractSoundProcessor):
 
         spec_tensor = torch.tensor(specs, dtype=torch.float32)
         return spec_tensor
+
