@@ -2,14 +2,14 @@ defaults:
   - _self_
   - lr_scheduler: exponential
   - optimizer: adam
-  - model: action_conditional
-  - split: cv
+  - model: static_sound_aware
+  - split: random
 
 tracking:
   uri: https://dagshub.com/RikiTikkiTavi/gentle-grasping.mlflow
   run: "action_conditional_model_run"
   experiment: test
 
-dataset_path: "/data/horse/ws/s4610340-gentle-grasp/gentle-grasping/data/raw/data_gentle_grasping/gentle_grasping_dataset.pth"
+dataset_path: "/data/horse/ws/s4610340-gentle-grasp/gentle-grasping/data/raw/data_gentle_grasping/collected_data"
 batch_size: 64
 max_epochs: 50

@@ -5,7 +5,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, Learning
 from pytorch_lightning.loggers import MLFlowLogger
 import torch
 
-from gentle_grasp.model_module import GentleGraspModelModule
+from gentle_grasp.model.static_sound_aware import StaticSoundAwareGraspSuccessModelModule
 from gentle_grasp.data_module import GentleGraspDataModule
 
 import hydra
@@ -50,11 +50,11 @@ def main(cfg: OmegaConf):
                 datamodule = GentleGraspDataModule(
                     data_path=data_path, 
                     batch_size=batch_size, 
-                    num_workers=2, 
+                    num_workers=8, 
                     split_strategy=hydra.utils.instantiate(cfg.split, fold=fold_i),
                 )
 
-                modelmodule = GentleGraspModelModule(cfg=cfg)
+                modelmodule = StaticSoundAwareGraspSuccessModelModule(cfg=cfg)
 
                 # Callbacks
                 # Stop if no improvement after 5 epochs
