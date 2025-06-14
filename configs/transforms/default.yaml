@@ -36,4 +36,3 @@ audio:
     n_mels: 128
 
   - _target_: torchaudio.transforms.AmplitudeToDB
-    amin: 1e-6
