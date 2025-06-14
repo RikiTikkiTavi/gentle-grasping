@@ -121,7 +121,7 @@ class BaseSoundProcessor(AbstractSoundProcessor):
         features = self.extraction_transform(waveform)
         for aug in self.augmentation_transform:
             features = aug(features)
-        return features
+        return features.squeeze(0)
 
     @abstractmethod
     def extraction_transform(self, waveform: torch.Tensor) -> torch.Tensor:
@@ -162,9 +162,10 @@ class LogMel2DSoundProcessor(BaseSoundProcessor):
         )
         super().__init__(augmentation_transform)
 
-    def extraction_transform(self, waveform: torch.Tensor) -> torch.Tensor:
-        mel_spec = self.mel_transform(waveform)
-        log_mel_spec = torch.log(mel_spec + 1e-6)
-        # Squeeze [channel, n_mels, time] shape to [n_mels, time]
-        features = log_mel_spec.squeeze(0)
-        return features
+#Note: No need for this anymore, as the mel transform is already applied in the transform method.
+    # def extraction_transform(self, waveform: torch.Tensor) -> torch.Tensor:
+    #     mel_spec = self.mel_transform(waveform)
+    #     log_mel_spec = torch.log(mel_spec + 1e-6)
+    #     # Squeeze [channel, n_mels, time] shape to [n_mels, time]
+    #     features = log_mel_spec.squeeze(0)
+    #     return features
