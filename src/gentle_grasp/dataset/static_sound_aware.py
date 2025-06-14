@@ -104,13 +104,15 @@ class StaticSoundAwareLazyDataset(Dataset):
     def __init__(
         self,
         root_dir: Path,
-        transforms: Callable,
+        image_transforms: Callable,
+        sensor_transforms: Callable,
         loader: SampleLoader,
         sound_processor: AbstractSoundProcessor,
         label_idx: Sequence[int] = (0,)
     ):
         self.root_dir = root_dir
-        self.transform = transforms
+        self.transform_image = image_transforms
+        self.transform_sensor = sensor_transforms
         self.samples = []
         self.time_steps = [1, 12, 2]
         self.loader = loader
@@ -138,10 +140,12 @@ class StaticSoundAwareLazyDataset(Dataset):
             and os.path.exists(os.path.join(data_dir, FileNameTemplate.SOUND.value))
         )
 
-    def shallow_copy_with_transform(self, t: Callable):
+    # TODO: So with or without transforms?
+    def shallow_copy_with_transform(self, timg: Callable, ts: Callable):
         """Create a shallow copy of the dataset without applying transforms."""
         new_ds = copy.copy(self)
-        new_ds.transform = t
+        new_ds.transform_image = timg
+        new_ds.transform_sensor = ts
         return new_ds
 
     def __getitem__(self, index: int):
@@ -149,11 +153,19 @@ class StaticSoundAwareLazyDataset(Dataset):
         data_dir, idx = self.samples[index]
         sample = self.loader(data_dir, idx)
 
-        if self.transform:
-            camera_rgb = self.transform(sample["camera_rgb"])
-            camera_depth = self.transform(sample["camera_depth"])
-            touch_middle = self.transform(sample["touch_middle"])
-            touch_thumb = self.transform(sample["touch_thumb"])
+        # Load images and sensor data
+        camera_rgb = sample["camera_rgb"]
+        camera_depth = sample["camera_depth"]
+        touch_middle = sample["touch_middle"]
+        touch_thumb = sample["touch_thumb"]
+
+        # Apply transformations
+        if self.transform_image:
+            camera_rgb = self.transform_image(sample["camera_rgb"])
+            camera_depth = self.transform_image(sample["camera_depth"])
+        if self.transform_sensor:
+            touch_middle = self.transform_sensor(sample["touch_middle"])
+            touch_thumb = self.transform_sensor(sample["touch_thumb"])
 
         sound = self.sound_processor.transform(sample["sound"])
 
