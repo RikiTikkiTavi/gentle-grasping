@@ -162,7 +162,7 @@ class LogMel2DSoundProcessor(BaseSoundProcessor):
         )
         super().__init__(augmentation_transform)
 
-#Note: No need for this anymore, as the mel transform is already applied in the transform method.
+#Note: No need for this anymore, as the mel transform is already applied in the transform method(in theory it's the same)
     # def extraction_transform(self, waveform: torch.Tensor) -> torch.Tensor:
     #     mel_spec = self.mel_transform(waveform)
     #     log_mel_spec = torch.log(mel_spec + 1e-6)
