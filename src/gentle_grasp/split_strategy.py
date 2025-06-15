@@ -1,4 +1,5 @@
 from pathlib import Path
+import numpy as np
 from sympy import postorder_traversal
 import torch
 from torch.utils.data import DataLoader, random_split, Subset, Dataset
@@ -48,10 +49,10 @@ class CrossValidationSplit(SplitStrategy):
         return self._n_folds
 
     def split(self, indices):
-        l2indices = list(
+        l2indices: list[tuple[np.ndarray, np.ndarray]] = list(
             KFold(n_splits=self.n_folds, shuffle=True, random_state=self._seed).split(
                 indices
             )
         )
         train_l2_idx, val_l2_idx = l2indices[self.fold]
-        return indices[train_l2_idx], indices[val_l2_idx]
+        return [indices[i] for i in train_l2_idx], [indices[i] for i in val_l2_idx]
