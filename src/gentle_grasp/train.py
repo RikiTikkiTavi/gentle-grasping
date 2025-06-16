@@ -23,22 +23,7 @@ def main(cfg: OmegaConf):
     data_path = Path(cfg.dataset_path)
     batch_size = cfg.batch_size
     max_epochs = cfg.max_epochs
-    sound_mono = cfg.sound_mono
-
-    transforms = {
-        "image": {
-            "pre": hydra.utils.instantiate(cfg.transforms.image.pre),
-            "augmentations": hydra.utils.instantiate(cfg.transforms.image.augmentations),
-            "post": hydra.utils.instantiate(cfg.transforms.image.post),
-        },
-        "sensor": {
-            "pre": hydra.utils.instantiate(cfg.transforms.sensor.pre),
-            "augmentations": hydra.utils.instantiate(cfg.transforms.sensor.augmentations),
-            "post": hydra.utils.instantiate(cfg.transforms.sensor.post),
-        },
-        # TODO: Specify sound transforms
-        "audo": [hydra.utils.instantiate(i) for i in cfg.transforms.audio]
-    }
+    gpu_device = cfg.gpu_device
 
     torch.set_float32_matmul_precision("high")
 
@@ -68,8 +53,6 @@ def main(cfg: OmegaConf):
                     batch_size=batch_size,
                     num_workers=8,
                     split_strategy=hydra.utils.instantiate(cfg.split, fold=fold_i),
-                    sound_mono=sound_mono,
-                    transforms=transforms,
                 )
 
                 modelmodule = StaticSoundAwareGraspSuccessModelModule(cfg=cfg)
@@ -97,7 +80,7 @@ def main(cfg: OmegaConf):
                     ],
                     logger=logger,
                     accelerator="auto",
-                    # devices=[6],
+                    devices=[gpu_device],
                     enable_checkpointing=False,
                 )
 

@@ -15,3 +15,4 @@ dataset_path: "/data/horse/ws/s4610340-gentle-grasp/gentle-grasping/data/raw/dat
 batch_size: 64
 max_epochs: 50
 sound_mono: true
+gpu_device: 3
