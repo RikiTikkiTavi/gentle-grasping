@@ -96,7 +96,7 @@ def main(cfg: OmegaConf):
                         early_stop,
                         lr_monitor,
                     ],
-                    logger=logger,
+                    # logger=logger,
                     accelerator="auto",
                     devices=[gpu_device],
                     enable_checkpointing=False,

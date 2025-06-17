@@ -25,7 +25,7 @@ class AudioCNN(nn.Sequential):
 
     def __init__(
         self,
-        embedding_dim=128, 
+        embedding_dim=128,
         input_channels=1
     ):
         super().__init__(
@@ -136,7 +136,7 @@ class StaticSoundAwareModel(nn.Module):
         # *Note*: Zero tensors for actions as placeholders
         hand_action = torch.zeros(vision_rgb.shape[0], 16, device=vision_rgb.device)  # [B, 16]
         relpose_action = torch.zeros(vision_rgb.shape[0], 4, device=vision_rgb.device)  # [B, 4]
-        
+
 
         # Extract features from DenseNet
         feat_rgb = self.vision_backbone_rgb(vision_rgb)  # [B, 1024]
@@ -149,6 +149,7 @@ class StaticSoundAwareModel(nn.Module):
         pose_feat = self.pose_mlp(hand_action)  # [B, 64]
 
         sound = input["sound"].unsqueeze(1) # [B, 1, spectrogram_height, spectrogram_width]
+        print(f"Sound shape: {sound.shape}")
         sound_feat = self.sound_embedding(sound)  # [B, sound_embedding_dim]
 
         # Concatenate all
