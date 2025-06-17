@@ -38,7 +38,7 @@ def main(cfg: OmegaConf):
             "post": hydra.utils.instantiate(cfg.transforms.sensor.post),
         },
         # TODO: Specify sound transforms
-        "audo": [hydra.utils.instantiate(i) for i in cfg.transforms.audio]
+        "audio": [hydra.utils.instantiate(i) for i in cfg.transforms.audio]
     }
 
     torch.set_float32_matmul_precision("high")
