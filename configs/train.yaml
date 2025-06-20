@@ -4,6 +4,7 @@ defaults:
   - optimizer: adam
   - model: static_sound_aware
   - split: random
+  - transforms: default
 
 tracking:
   uri: https://dagshub.com/RikiTikkiTavi/gentle-grasping.mlflow
@@ -13,3 +14,5 @@ tracking:
 dataset_path: "/data/horse/ws/s4610340-gentle-grasp/gentle-grasping/data/raw/data_gentle_grasping/collected_data"
 batch_size: 64
 max_epochs: 50
+sound_mono: true
+gpu_device: 3

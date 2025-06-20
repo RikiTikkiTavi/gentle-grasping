@@ -1,0 +1,38 @@
+image:
+  pre:
+    - _target_: torchvision.transforms.v2.Resize
+      size: [256, 256]
+
+  augmentations:
+    - _target_: torchvision.transforms.v2.RandomCrop
+      size: [224, 224]
+
+  post:
+    - _target_: torchvision.transforms.v2.ToTensor
+    - _target_: torchvision.transforms.v2.Normalize
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+
+sensor:
+  pre:
+    - _target_: torchvision.transforms.v2.Resize
+      size: [256, 256]
+
+  augmentations:
+    - _target_: torchvision.transforms.v2.RandomCrop
+      size: [224, 224]
+
+  post:
+    - _target_: torchvision.transforms.v2.ToTensor
+    - _target_: torchvision.transforms.v2.Normalize
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+
+audio:
+  - _target_: torchaudio.transforms.MelSpectrogram
+    sample_rate: 44100
+    n_fft: 1024
+    hop_length: 512
+    n_mels: 128
+
+  - _target_: torchaudio.transforms.AmplitudeToDB
