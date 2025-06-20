@@ -1,5 +1,6 @@
 from collections import defaultdict
 from email.policy import default
+from typing import Callable
 import hydra
 import pandas as pd
 import torch
@@ -10,7 +11,7 @@ from torchmetrics.classification import (
     BinaryAccuracy,
     BinarySpecificity,
     ConfusionMatrix,
-    BinaryConfusionMatrix
+    BinaryConfusionMatrix,
 )
 from torchvision.models import densenet121
 from pytorch_lightning import LightningModule
@@ -21,145 +22,194 @@ import matplotlib.pyplot as plt
 import tempfile
 
 
-class AudioCNN(nn.Sequential):
+class AudioEmbeddingCNN(nn.Sequential):
 
-    def __init__(
-        self,
-        embedding_dim=128,
-        input_channels=1
-    ):
+    def __init__(self, embedding_dim=128, input_channels=1):
+        self.embedding_dim = embedding_dim
         super().__init__(
             # Layer 1
             nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
-
             # Layer 2
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
-
             # Layer 3
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
-
             # Flattening
             nn.Flatten(),
-
             # Fully Connected Layers
-            nn.Linear(128 * 16 * 16, 256),  # Assuming input mel-spectrogram size of 128x128
+            nn.Linear(
+                128 * 16 * 16, 256
+            ),  # Assuming input mel-spectrogram size of 128x128
             nn.ReLU(),
             nn.Dropout(0.5),
-
             # Embedding Layer
-            nn.Linear(256, embedding_dim)
+            nn.Linear(256, embedding_dim),
         )
 
 
-class StaticSoundAwareModel(nn.Module):
+class VisuoTactileEmbeddingDenseNet(nn.Module):
+    def __init__(self, dropout: float = 0.5):
+        super().__init__()
+        self.embedding_dim = 1024
+        self.backbone = densenet121(weights="IMAGENET1K_V1", drop_rate=dropout)
+        self.backbone.classifier = nn.Identity()  # type: ignore
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.backbone(x)  # [B, 1024]
+
+
+class ActionEmbeddingMLP(nn.Sequential):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 1024,
+        embedding_dim: int = 1024,
+        dropout: float = 0.25,
+    ):
+        super().__init__(
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(num_features=hidden_dim),
+            nn.Mish(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, embedding_dim),
+            nn.BatchNorm1d(num_features=embedding_dim),
+            nn.Mish(),
+            nn.Dropout(p=dropout),
+        )
+        self.embedding_dim = embedding_dim
+
+
+class FinalClassifierMLP(nn.Sequential):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 1024,
+        output_dim: int = 1,
+        dropout: float = 0.25,
+    ):
+        super().__init__(
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(num_features=hidden_dim),
+            nn.Mish(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+
+class SoundAwareModel(nn.Module):
 
     def __init__(
         self,
-        dropout_sensory: float = 0.25,
-        dropout_action: float = 0.25,
-        dropout_final: float = 0.25,
-        action_hidden_dim: int = 1024,
-        action_embedding_dim: int = 1024,
-        sound_embedding_dim: int = 128,
-        final_hidden_dim: int = 1024,
-        output_dim: int = 1
+        visual_embed: VisuoTactileEmbeddingDenseNet | None,
+        touch_embed_thumb: VisuoTactileEmbeddingDenseNet | None,
+        touch_embed_middle: VisuoTactileEmbeddingDenseNet | None,
+        action_embed_motion: ActionEmbeddingMLP | None,
+        action_embed_pose: ActionEmbeddingMLP | None,
+        sound_embdedding: AudioEmbeddingCNN | None,
+        final_classifier: Callable[[int], nn.Module],
     ):
         super().__init__()
 
+        embedding_size = 0
+
         # Vision backbones for 3 images
-        self.vision_backbone_rgb = self._get_densenet(dropout=dropout_sensory)
-        self.vision_backbone_middle = self._get_densenet(dropout=dropout_sensory)
-        self.vision_backbone_thumb = self._get_densenet(dropout=dropout_sensory)
+        self.vision_backbone_rgb = visual_embed
+        if self.vision_backbone_rgb is not None:
+            embedding_size += self.vision_backbone_rgb.embedding_dim
+        self.vision_backbone_middle = touch_embed_thumb
+        if self.vision_backbone_middle is not None:
+            embedding_size += self.vision_backbone_middle.embedding_dim
+        self.vision_backbone_thumb = touch_embed_middle
+        if self.vision_backbone_thumb is not None:
+            embedding_size += self.vision_backbone_thumb.embedding_dim
 
         # MLPs for action inputs
         # relpose_action: [B, 4] (motion)
-        self.motion_mlp = nn.Sequential(
-            nn.Linear(4, action_hidden_dim),
-            nn.BatchNorm1d(num_features=action_hidden_dim),
-            nn.Mish(),
-            nn.Dropout(p=dropout_action),
-            nn.Linear(action_hidden_dim, action_embedding_dim),
-            nn.BatchNorm1d(num_features=action_embedding_dim),
-            nn.Mish(),
-            nn.Dropout(p=dropout_action),
-        )
+        self.motion_mlp = action_embed_motion
+        if self.motion_mlp is not None:
+            embedding_size += self.motion_mlp.embedding_dim
 
         # hand_action: [B, 16] (pose)
-        self.pose_mlp = nn.Sequential(
-            nn.Linear(16, action_hidden_dim),
-            nn.BatchNorm1d(num_features=action_hidden_dim),
-            nn.Mish(),
-            nn.Dropout(p=dropout_action),
-            nn.Linear(action_hidden_dim, action_embedding_dim),
-            nn.BatchNorm1d(num_features=action_embedding_dim),
-            nn.Mish(),
-            nn.Dropout(p=dropout_action),
-        )
-
-        # Freeze action MLPs
-        for m in [self.motion_mlp, self.pose_mlp]:
-            for param in m.parameters():
-                param.requires_grad = False  # Freeze action MLPs
-
+        self.pose_mlp = action_embed_pose
+        if self.pose_mlp is not None:
+            embedding_size += self.pose_mlp.embedding_dim
         # Sound embedding
-        self.sound_embedding = AudioCNN(
-            embedding_dim=sound_embedding_dim,
-            input_channels=1,  # Assuming mono audio input
-        )
+        self.sound_embedding = sound_embdedding
+        if self.sound_embedding is not None:
+            embedding_size += self.sound_embedding.embedding_dim
 
         # Final MLP
-        self.final_mlp = nn.Sequential(
-            nn.Linear(3 * 1024 + 2 * action_embedding_dim + sound_embedding_dim, final_hidden_dim),
-            nn.BatchNorm1d(num_features=final_hidden_dim),
-            nn.Mish(),
-            nn.Dropout(dropout_final),
-            nn.Linear(final_hidden_dim, output_dim),  # Output: [success_prob, gentleness_prob]
-        )
+        self.final_mlp = final_classifier(embedding_size)
 
-    def _get_densenet(self, dropout: float = 0.5):
-        model = densenet121(weights="IMAGENET1K_V1", drop_rate=dropout)
-        model.classifier = nn.Identity()  # type: ignore
-        return model
+    def _forward_otherwise_empty(self, module: nn.Module, x: torch.Tensor):
+        """
+        Forward pass through a module, returning an empty tensor if the module is None.
+        """
+        if module is not None:
+            return module(x)
+        else:
+            return torch.zeros(x.shape[0], 1024, device=x.device)
 
-    def forward(self, input: dict[str, torch.Tensor],):
+    def forward(
+        self,
+        input: dict[str, torch.Tensor],
+    ):
         vision_rgb = input["camera_rgb"]  # [B, 3, 224, 224]
         # vision_depth = input["camera_depth"]  # [B, 3, 224, 224]
         # touch_middle = input["touch_middle"]  # [B, 3, 224, 224]
         # touch_thumb = input["touch_thumb"]  # [B, 3, 224, 224]
 
         # *Note*: Zero tensors for actions as placeholders
-        hand_action = torch.zeros(vision_rgb.shape[0], 16, device=vision_rgb.device)  # [B, 16]
-        relpose_action = torch.zeros(vision_rgb.shape[0], 4, device=vision_rgb.device)  # [B, 4]
+        # hand_action = torch.zeros(
+        #     vision_rgb.shape[0], 16, device=vision_rgb.device
+        # )  # [B, 16]
+        # relpose_action = torch.zeros(
+        #     vision_rgb.shape[0], 4, device=vision_rgb.device
+        # )  # [B, 4]
 
+        embedded_features = []
 
-        # Extract features from DenseNet
-        feat_rgb = self.vision_backbone_rgb(vision_rgb)  # [B, 1024]
-        # feat_depth = self.vision_backbone_middle(vision_depth)
-        feat_middle = self.vision_backbone_middle(input["touch_middle"])
-        feat_thumb = self.vision_backbone_thumb(input["touch_thumb"])
+        # Vision
+        if self.vision_backbone_rgb is not None:
+            feat_rgb = self.vision_backbone_rgb(vision_rgb)  # [B, vision_embedding_dim]
+            embedded_features.append(feat_rgb)
+        # Touch
+        if self.vision_backbone_middle is not None:
+            feat_middle = self.vision_backbone_middle(input["touch_middle"])
+            embedded_features.append(feat_middle)  # [B, touch_embedding_dim]
+        if self.vision_backbone_thumb is not None:
+            feat_thumb = self.vision_backbone_thumb(input["touch_thumb"])
+            embedded_features.append(feat_thumb)  # [B, touch_embedding_dim]
+        # Actions
+        if self.motion_mlp is not None:
+            motion_feat = self.motion_mlp(
+                input["motion_action"]
+            )  # [B, action_embedding_dim]
+            embedded_features.append(motion_feat)  # [B, action_embedding_dim]
+        if self.pose_mlp is not None:
+            pose_feat = self.pose_mlp(input["hand_action"])  # [B, action_embedding_dim]
+            embedded_features.append(pose_feat)
+        # Sound
+        if self.sound_embedding is not None:
+            sound = input["sound"].unsqueeze(
+                1
+            )  # [B, 1, spectrogram_height, spectrogram_width] as image-like input (B, C, H, W)
+            sound_feat = self.sound_embedding(sound)  # [B, sound_embedding_dim]
+            embedded_features.append(sound_feat)
 
-        # Encode actions
-        motion_feat = self.motion_mlp(relpose_action)  # [B, 64]
-        pose_feat = self.pose_mlp(hand_action)  # [B, 64]
-
-        sound = input["sound"].unsqueeze(1) # [B, 1, spectrogram_height, spectrogram_width]
-        print(f"Sound shape: {sound.shape}")
-        sound_feat = self.sound_embedding(sound)  # [B, sound_embedding_dim]
-
-        # Concatenate all
+        # Concatenate all along feature dimension
         all_feats = torch.cat(
-            [feat_rgb, feat_middle, feat_thumb, motion_feat, pose_feat, sound_feat],
+            embedded_features,
             dim=1,
         )
 
         # Final MLP
-        out = self.final_mlp(all_feats)  # [B, 2]
+        out = self.final_mlp(all_feats)  # [B, output_dim]
         return out
 
 
@@ -206,7 +256,9 @@ class StaticSoundAwareGraspSuccessModelModule(LightningModule):
             pred_classes = preds_bin[:, 0] * 2 + preds_bin[:, 1]
             label_classes = labels_bin[:, 0] * 2 + labels_bin[:, 1]
         else:
-            raise ValueError("Only supports 1 or 2 output labels for joint confusion matrix.")
+            raise ValueError(
+                "Only supports 1 or 2 output labels for joint confusion matrix."
+            )
 
         self.val_cm_joint.update(pred_classes, label_classes)
 
