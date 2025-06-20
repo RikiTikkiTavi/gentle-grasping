@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Callable, List
 from sympy import postorder_traversal
 import torch
 from torch.utils.data import DataLoader, random_split, Subset, Dataset
@@ -19,30 +20,38 @@ class GentleGraspDataModule(LightningDataModule):
         data_path: Path,
         batch_size: int = 32,
         num_workers: int = 4,
+        sound_mono: bool = True,
+        transforms: dict[str, dict[str, list[Callable]]] | None = None,
+
     ):
         super().__init__()
         self.data_path = data_path
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.split_strategy = split_strategy
+        self.sound_mono = sound_mono
+        self.transforms = transforms or {}
 
     def setup(self, stage=None):
         # TODO: Dependency injection
 
-        pre_transforms = [
-            transforms.Resize((256, 256)),
-        ]
+        # Extract transforms from the configuration
+        image_transforms = self.transforms.get("image", {})
+        sensor_transforms = self.transforms.get("sensor", {})
+        audio_transforms = self.transforms.get("audio", [])
 
-        augmentations = [
-            transforms.RandomCrop((224, 224)),
-        ]
+        image_pre_transforms = image_transforms.get("pre", [])
+        image_augmentations = image_transforms.get("augmentations", [])
+        image_post_transforms = image_transforms.get("post", [])
 
-        post_transforms = [
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-        ]
+        sensor_pre_transforms = sensor_transforms.get("pre", [])
+        sensor_augmentations = sensor_transforms.get("augmentations", [])
+        sensor_post_transforms = sensor_transforms.get("post", [])
 
-        sound_processor=LogMel2DSoundProcessor()
+        sound_processor=LogMel2DSoundProcessor(
+            mono=self.sound_mono,
+            augmentation_transform=audio_transforms,
+        )
 
         loader = SampleLoader(sound_processor=sound_processor,)
 
@@ -51,11 +60,13 @@ class GentleGraspDataModule(LightningDataModule):
             root_dir=self.data_path,
             loader=loader,
             sound_processor=sound_processor,
-            transforms=transforms.Compose(pre_transforms + post_transforms),
+            image_transforms=transforms.Compose(image_pre_transforms + image_post_transforms),
+            sensor_transforms=transforms.Compose(sensor_pre_transforms + sensor_post_transforms),
         )
         # Dataset with augmentations to sample training set
         dataset_with_transform = dataset.shallow_copy_with_transform(
-            t=transforms.Compose(pre_transforms + augmentations + post_transforms)
+            timg=transforms.Compose(image_pre_transforms + image_augmentations + image_post_transforms),
+            ts=transforms.Compose(sensor_pre_transforms + sensor_augmentations + sensor_post_transforms),
         )
         train_idx, val_idx = self.split_strategy.split(list(range(len(dataset))))
 
