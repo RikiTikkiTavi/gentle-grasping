@@ -1,13 +1,7 @@
 _target_: gentle_grasp.model.static_sound_aware.SoundAwareModel
-visual_embed:
-  _target_: gentle_grasp.model.static_sound_aware.VisuoTactileEmbeddingDenseNet
-  dropout: 0.25
-touch_embed_thumb:
-  _target_: gentle_grasp.model.static_sound_aware.VisuoTactileEmbeddingDenseNet
-  dropout: 0.25
-touch_embed_middle:
-  _target_: gentle_grasp.model.static_sound_aware.VisuoTactileEmbeddingDenseNet
-  dropout: 0.25
+visual_embed: null
+touch_embed_thumb: null
+touch_embed_middle: null
 action_embed_motion: null
 action_embed_pose: null
 # action_embed_motion:
