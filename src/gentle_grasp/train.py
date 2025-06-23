@@ -1,5 +1,5 @@
 from pathlib import Path
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import MLFlowLogger
@@ -14,18 +14,10 @@ import mlflow
 
 from contextlib import nullcontext
 
-@hydra.main(version_base="1.3", config_path="../../configs", config_name="train")
-def main(cfg: OmegaConf):
-    # TODO: Remove reassignments
-    mlflow_tracking_uri = cfg.tracking.uri
-    experiment_name = cfg.tracking.experiment
-    run_name = cfg.tracking.run
-    data_path = Path(cfg.dataset_path)
-    batch_size = cfg.batch_size
-    max_epochs = cfg.max_epochs
-    gpu_device = cfg.gpu_device
-    sound_mono = cfg.sound_mono
+OmegaConf.register_new_resolver("sum", sum)
 
+@hydra.main(version_base="1.3", config_path="../../configs", config_name="train")
+def main(cfg: DictConfig):
     transforms = {
         "image": {
             "pre": hydra.utils.instantiate(cfg.transforms.image.pre),
@@ -45,31 +37,31 @@ def main(cfg: OmegaConf):
 
     n_folds = cfg.split.get("n_folds", 1)
 
-    print(mlflow_tracking_uri)
+    print(cfg.tracking.uri)
     print(cfg.split)
 
-    mlflow.set_tracking_uri(mlflow_tracking_uri)
-    mlflow.set_experiment(experiment_name=experiment_name)
+    mlflow.set_tracking_uri(cfg.tracking.uri)
+    mlflow.set_experiment(experiment_name=cfg.tracking.experiment)
 
     # Start the parent run
-    with mlflow.start_run(run_name=run_name) as parent_run:
+    with mlflow.start_run(run_name=cfg.tracking.run ) as parent_run:
         # Iterate over folds
         for fold_i in range(n_folds):
             # Start the child run if in multi-fold settings
             with (
                 mlflow.start_run(
-                    run_name=f"fold_{fold_i}_{run_name}",
+                    run_name=f"fold_{fold_i}_{cfg.tracking.run}",
                     nested=True,
                     parent_run_id=parent_run.info.run_id,
                 ) if n_folds > 1 else nullcontext(enter_result=parent_run)
             ) as child_run:
 
                 datamodule = GentleGraspDataModule(
-                    data_path=data_path,
-                    batch_size=batch_size,
+                    data_path=Path(cfg.dataset_path),
+                    batch_size=cfg.batch_size,
                     num_workers=8,
                     split_strategy=hydra.utils.instantiate(cfg.split, fold=fold_i),
-                    sound_mono=sound_mono,
+                    sound_mono=cfg.sound_mono,
                     transforms=transforms,
                 )
 
@@ -82,23 +74,23 @@ def main(cfg: OmegaConf):
 
                 # Logger
                 logger = MLFlowLogger(
-                    tracking_uri=mlflow_tracking_uri,
+                    tracking_uri=cfg.tracking.uri,
                     run_id=child_run.info.run_id
                 )
 
                 # Log hyperparameters
-                logger.log_hyperparams(cfg)
+                logger.log_hyperparams(OmegaConf.to_object(cfg)) # type: ignore
 
                 # Trainer
                 trainer = pl.Trainer(
-                    max_epochs=max_epochs,
+                    max_epochs=cfg.max_epochs,
                     callbacks=[
                         early_stop,
                         lr_monitor,
                     ],
-                    # logger=logger,
+                    logger=logger,
                     accelerator="auto",
-                    devices=[gpu_device],
+                    devices=[cfg.gpu_device],
                     enable_checkpointing=False,
                 )
 
