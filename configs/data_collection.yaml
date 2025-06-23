@@ -1,0 +1,102 @@
+# ID numbers of robots and sensors
+robots:
+  xarm_ip: "192.168.1.199"  # Fill in IP adress of xArm
+  xarm_weight: 1.2  # Fill in the payload weight of xArm
+  xarm_tcp: [25.78, 33.66, 258.87]  # Fill in the TCP of xArm
+  xarm_tcp_offset: [0, 0, 100, 0, 0, 0]
+  xarm_sensitivity: 2
+  digit_thumb: "D20811"  # Fill in a serial number of Digit
+  digit_middle: "D20806"
+  touch_detection_threshold: 0.1
+  depth_alpha: 0.175  # for RealSense depth colormap
+  # sound_threshold: 10000  # with fixed microphone
+  # sound_threshold: 6000  # with new microphone
+  sound_threshold: 23500  # walrus
+  sound_channels: 2
+  sound_sample_rate: 44100
+  sound_chunk_size: 1024
+
+# control params (with a left hand)
+control:
+  control_freq: 20
+  hand_before:
+    [-0.5, 1.0, 0, 0,  # index (fixed)
+     -0.25, # middle (fixed)
+     1.0, 0, 0,  
+     0, 1.0, 0, 0,  # ring (fixed)
+     1.45, 0.1,  # thumb (fixed)
+     -0.2, -0.1]
+  hand_min:  # always failure
+    [-0.5, 1.0, 0, 0,  # index (fixed)
+     -0.25, # middle (fixed)
+     1.45, 0, 0,
+     0, 1.0, 0, 0,  # ring (fixed)
+     1.45, 0.1,  # thumb (fixed)
+     0.2, 0]
+  hand_random:
+    [-0.5, 1.0, 0, 0,  # index (fixed)
+     -0.25, # middle (fixed)
+     1.4, 0, 0,  
+     0, 1.0, 0, 0,  # ring (fixed)
+     1.45, 0.1,  # thumb (fixed)
+     0.2, 0]
+  hand_init:  # gentle grasping (success, gentle)
+    [-0.5, 1.0, 0, 0,  # index (fixed)
+     -0.25, # middle (fixed)
+     1.6, 0, 0,  
+     0, 1.0, 0, 0,  # ring (fixed)
+     1.45, 0.1,  # thumb (fixed)
+     0.35, 0]
+  hand_half:  # make sounds when grasping sweet spots
+    [-0.5, 1.0, 0, 0,  # index (fixed)
+     -0.25, # middle (fixed)
+     1.6, 0.15, 0.15,  
+     0, 1.0, 0, 0,  # ring (fixed)
+     1.45, 0.1,  # thumb (fixed)
+     0.35, 0.15]
+  hand_max:  # always non-gentle
+    [-0.5, 1.0, 0, 0,  # index (fixed)
+     -0.25, # middle (fixed)
+     1.75, 0.3, 0.3,  
+     0, 1.0, 0, 0,  # ring (fixed)
+     1.45, 0.1,  # thumb (fixed)
+     0.5, 0.3]
+  hand_lower:
+    [-0.594, -0.296, -0.274, -0.327,
+     -0.594, -0.296, -0.274, -0.327,
+     -0.594, -0.296, -0.274, -0.327,
+     0.363, -0.205, -0.289, -0.262]
+  hand_upper:
+    [0.571, 1.736, 1.809, 1.718,
+     0.571, 1.736, 1.809, 1.718,
+     0.571, 1.736, 1.809, 1.718,
+     1.496, 1.263, 1.744, 1.819]
+  xarm_pre:
+    [0, -40, 0, 30, 0, -18, 140]  # outside the view, about [400, 0, 550]
+  xarm_before:
+    [0, 0, 0, 10, 0, -72.5, 140]  # about [390, 0, 300]
+  xarm_init:
+    [-8, 42, 8.5, 45, 0, -77, 140]
+  xarm_grasp: 
+    [-8, 42, 8.5, 45, 0, -77, 140]  # equal to xarm_init
+  roi: [[315, 125],  # top_left
+        [420, 125],  # top_right
+        [485, 310],  # bottom_right
+        [280, 310]]  # bottom_left
+  camera_pos: [368, -672, 630]  # [368, -745 + 73.7, 629.5]
+  camera_rot: [-139.3, -2, -0.9]
+  offset_y: 20
+  offset_z: 150
+  turb_xy: [-10, 10]
+  range_x: [450, 650]
+  range_y: [-200, 200]
+  range_z: [5, 30]
+  range_rot: [-30, 30]
+  regrasp_xy: [-10, 10]
+  regrasp_z: [-10, 10]
+  regrasp_rot: [-15, 15]
+  # threshold_disp_thumb: 50
+  opt:
+    num_max_regrasp: 3
+    num_samples: 100000
+    num_nonrelpose: 5000
